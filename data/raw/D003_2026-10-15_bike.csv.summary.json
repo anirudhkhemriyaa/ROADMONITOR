@@ -1,0 +1,21 @@
+{
+  "file": "D003_2026-10-15_bike.csv",
+  "sha256": "cb2275a4f1a56fce3fa7670b4dee38b85bceda98a751a243b92c14dceca77c87",
+  "vehicle_type": "bike",
+  "phone_model": "RMX2156",
+  "uploaded_at": "2026-10-15T16:27:30",
+  "has_markers": false,
+  "summary": {
+    "rows": 21943,
+    "duration_s": 430.8,
+    "hz": 50.9,
+    "gaps_over_1s": 0,
+    "longest_gap_s": 0,
+    "duplicate_pct": 0.0,
+    "gps_fresh_pct": 93,
+    "gps_median_acc_m": 5.4,
+    "backwards_steps": 0,
+    "status": "OK",
+    "warnings": []
+  }
+}
