@@ -149,7 +149,57 @@ Large raw CSV files are excluded from Git version control; sample drive summarie
 ## 🗺️ Planned Roadmap
 
 The following modules are planned for subsequent iterations:
-- [ ] **Interactive GIS Map**: Integrate Mapbox / Leaflet in `web/` to display color-coded road quality heatmaps.
-- [ ] **Automated Anomaly Detection**: Machine learning model (Random Forest / CNN) for automated detection of potholes and speed bumps from vertical acceleration spikes.
-- [ ] **Persistent Database**: Transition backend storage from flat filesystem files to SQLite / PostgreSQL.
-- [ ] **Real-time Live Streaming**: WebSocket telemetry streaming from mobile devices directly to web dashboard.
+- [x] **Interactive GIS Map**: now `/dashboard` on the unified server (Leaflet, classes A–D, priority table, event clusters).
+- [ ] **Automated Anomaly Detection**: rule-based pothole/bump/rough classification shipped (v1); ML model upgrade deferred.
+- [x] **Persistent Database**: embedded SQLite by default; Postgres/PostGIS DDL + docker-compose included.
+- [x] **Real-time Live Streaming**: retained as-is (legacy `POST /api/live` WebSocket).
+
+---
+
+## 🚀 Road Monitor 2.0 (phases A–E, implemented)
+
+On top of the legacy system above, the platform now has a full sensor→map pipeline:
+
+### Phase A — Android pipeline (`android/`)
+Pure-Kotlin `com.roadmonitor.pipeline` package: 50 Hz resample, gravity/orientation fix,
+0.5–20 Hz band-pass, pothole/bump/rough event detection (gyro-gated, refractory),
+10 m roughness bins (rms/std/p95/kurtosis + 3 frequency bands), 30 s calibration,
+trip metadata, `*_events.jsonl` / `*_segments.jsonl` outputs. WorkManager uploader
+sends `POST /api/v1/trips` (gzip + idempotent `X-Trip-Id`) with automatic fallback to the
+legacy multipart `/upload`, applying the 150 m start/end privacy trim and WiFi-only default.
+11 JVM unit tests on synthetic signals.
+
+### Phase B — Backend v1 API (`backend/roadmonitor/`)
+FastAPI `application` mounts the untouched legacy `app` *and* the `/api/v1` router:
+`POST /devices/register`, idempotent `POST /trips`, `GET /trips/{id}/status`, `GET /trips`.
+Optional `X-Device-Key` auth (enforced when configured). SQLite store with the exact
+schema of `backend/sql/schema_postgres.sql` (swap to Postgres with docker-compose).
+
+### Phase C — Processing (`backend/roadmonitor/processing/`, `process.py`)
+Full recompute pipeline: DBSCAN (dependency-free) or OSM link grouping via an
+OSRM `/match` adapter (`mapmatch.enabled` in config), speed-normalized +
+recency-decayed aggregation, percentile classes A–D, trip/device confidence with
+candidate→confirmed gating, event clustering with median peak/width/type.
+Endpoints: `/api/v1/analysis/{links,events,priority,recompute}`.
+
+### Phase D — Dashboard
+`GET /dashboard` (unified server only): Leaflet map with class-coloured links,
+cluster popups, class/status filters, priority table (click-to-zoom), one-click recompute.
+
+### Phase E — Validation (`backend/roadmonitor/validation.py`)
+```
+cd backend && .venv\\Scripts\\python.exe -m roadmonitor.validation   # or: python -m roadmonitor.validation
+```
+Three controlled protocols on synthetic drives (thresholds in `config.yaml → validation`):
+- **repeatability** — same device twice → class concordance 1.0, score r 1.0
+- **cross_device** — different devices → same result
+- **speed** — shake ∝ (v/v_ref)^alpha planted physically; normalisation collapses 2.72× raw spread to 1.0×
+
+### Quick start (backend, venv)
+```bash
+cd backend
+pip install -r requirements.txt
+python -m roadmonitor.main        # http://localhost:8000  (legacy + /api/v1 + /dashboard)
+pytest tests -q                   # 36 tests
+```
+Docker (db + redis; api service staged for Postgres): `docker compose up`.

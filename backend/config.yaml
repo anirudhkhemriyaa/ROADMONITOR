@@ -33,3 +33,12 @@ mapmatch: {radius_m: 20, min_confidence: 0.5, enabled: false, base_url: "http://
 aggregate: {recency_tau_days: 60, conf_k: 2.0, conf_trips_weight: 0.5, ref_speed_mps: 8.33}
 cluster: {eps_m: 8, min_samples: 2, confirm_min_devices: 2, confirm_min_trips: 3}
 classes: {method: percentile, cuts: [50, 75, 90]}
+
+# ---- Phase E validation (python -m roadmonitor.validation) ----
+validation:
+  pos_tol_m: 25            # link positions must agree within this to be "the same link"
+  min_class_concordance: 0.9   # fraction of matched links with identical class
+  min_score_corr: 0.9      # Pearson r of matched score_norms
+  max_norm_ratio: 1.25     # max/min score_norm across speed runs for one zone
+  n_bins_per_zone: 3       # synthetic trip layout: bins per roughness zone
+  speed_runs_mps: [4.0, 8.33, 16.66]   # speeds for the speed-normalisation check
