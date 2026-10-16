@@ -54,7 +54,8 @@ def _prefix_rms(ts, vert, win_ms):
         cnt = i - lo + 1
         s = sums[i + 1] - sums[lo]
         s2 = sq[i + 1] - sq[lo]
-        rms[i] = max(0.0, s2 - s * s / cnt) ** 0.5   # clamp float error
+        # population variance: (Σx² − (Σx)²/n) / n  (the outer /n was missing)
+        rms[i] = max(0.0, (s2 - s * s / cnt) / cnt) ** 0.5   # clamp float error
     return rms, lo
 
 
@@ -185,7 +186,7 @@ def _frac_above(ts, vert, i, win_ms, sample_hz, th_v):
     vals = [v for v in vert[lo:i + 1] if v is not None]
     if not vals:
         return 0.0
-    return sum(1 for v in vals if v >= th_v) / len(vals)
+    return sum(1 for v in vals if abs(v) >= th_v) / len(vals)
 
 
 def _ev(kind, ts, latlon, i, vehicle_type, **features) -> dict:
