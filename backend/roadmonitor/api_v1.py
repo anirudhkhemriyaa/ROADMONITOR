@@ -152,6 +152,16 @@ def analysis_events(min_status: str = "candidate", limit: int = 1000):
     return get_store().event_clusters(min_status, limit)
 
 
+@router.get("/analysis/priority", dependencies=[Depends(check_device_key)])
+def analysis_priority(min_status: str = "candidate", limit: int = 1000):
+    """Links ranked by fix-first priority (class x confidence x recency)."""
+    limit = max(1, min(limit, 5000))
+    from .processing.priority import rank_links
+    from .config import CFG
+    from .processing.aggregate import now_ms_utc
+    return rank_links(get_store().links(min_status, limit), CFG, now_ms_utc())
+
+
 @router.post("/analysis/recompute", dependencies=[Depends(check_device_key)])
 def analysis_recompute():
     """Inline recompute (dev). In the docker deployment Celery runs this."""
