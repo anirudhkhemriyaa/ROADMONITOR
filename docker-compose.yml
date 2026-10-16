@@ -1,0 +1,28 @@
+# Road Monitor infrastructure (Phase C ready).
+# In Phase B the API runs on the laptop (cd backend && python main.py, SQLite);
+# `db` + `redis` below are the Phase C services. When the SQLAlchemy/Postgres
+# store lands, uncomment the api service and it picks ROADMONITOR_DB up.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: roadmonitor
+      POSTGRES_USER: roadmonitor
+      POSTGRES_PASSWORD: roadmonitor   # dev only - override in real deployments
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  # api:
+  #   build: {context: ., dockerfile: backend/Dockerfile}
+  #   ports: ["8000:8000"]
+  #   environment:
+  #     ROADMONITOR_DB: postgresql+psycopg://roadmonitor:roadmonitor@db:5432/roadmonitor
+  #   depends_on: [db]
+
+volumes:
+  pgdata:
