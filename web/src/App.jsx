@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Road Monitor - Web Dashboard
  *
  * This is the root React component. The web app will display drive data
