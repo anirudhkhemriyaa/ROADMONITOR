@@ -58,6 +58,35 @@ anomaly:
     bus: 1.5
     e_rickshaw: 0.75
 
+  # matching + aggregation + priority (additive stage thresholds)
+  match_radius_m: 15          # max GPS->edge snap distance
+  min_confirm_trips: 3        # "confirmed" needs >= 3 independent trips
+  boundary_grace_m: 200       # events this close to a trip start/end (post-trim)
+                              # are flagged and cannot confirm a segment
+  poi_buffer_m: 250           # POI impact buffer, measured ALONG the road graph
+  poi_weights:                # AHP-tunable site policy
+    hospital: 1.0
+    school: 0.9
+    college: 0.7
+    university: 0.7
+    dormitory: 0.7
+    marketplace: 0.6
+    bus_station: 0.6
+  road_class_weights:
+    primary: 1.0
+    secondary: 0.8
+    tertiary: 0.6
+    residential: 0.4
+    unclassified: 0.4
+    service: 0.2
+    track: 0.2
+  priority_weights:           # weights sum to 1.0; set via AHP later
+    severity: 0.45
+    frequency: 0.20
+    poi: 0.20
+    road_class: 0.10
+    vulnerable: 0.05
+
 severity:
   weights: {p95: 0.6, rms: 0.4}   # weighted mix; AHP-tunable later
   # normalization anchors (m/s²) per vehicle - calibration pending
