@@ -58,13 +58,19 @@ def _link_id(members_idx: list, rows: list) -> str:
     return "lnk_" + hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
-def build_links(seg_rows: list, cfg: dict, now_ms: float) -> list:
+def build_links(seg_rows: list, cfg: dict, now_ms: float,
+                link_keys: list = None) -> list:
     """Clusters segment bins into road links and computes their scores.
 
     seg_rows rows need: trip_id, row_key, device_id, lat, lon, dist_m, rms,
     p95, speed_mean, ts_start, received_at_ms. Bins without GPS are skipped
     (positions unknown -> cannot be placed on a map; data stays in the store
     and in the on-device CSV).
+
+    link_keys (optional) is aligned with `placed` order (see process.py) and
+    gives an OSM node-pair per bin from mapmatch.match_points; when provided,
+    bins group by that key first and only unmatched bins (None) fall back to
+    DBSCAN clustering. Without map matching everything groups via DBSCAN.
     """
     eps = cfg["cluster"]["eps_m"]
     min_pts = cfg["cluster"]["min_samples"]
@@ -80,13 +86,30 @@ def build_links(seg_rows: list, cfg: dict, now_ms: float) -> list:
     placed = [r for r in seg_rows if r["lat"] is not None and r["lon"] is not None]
     if not placed:
         return []
-    labels = cluster([(r["lat"], r["lon"]) for r in placed], eps, min_pts)
 
     groups = {}
-    for i, r in enumerate(placed):
-        if labels[i] == NOISE:
-            continue
-        groups.setdefault(labels[i], []).append(i)
+    if link_keys is not None and len(link_keys) == len(placed):
+        unmatched = []
+        for i, key in enumerate(link_keys):
+            if key is None:
+                unmatched.append(i)
+            else:
+                groups.setdefault(key, []).append(i)
+        if unmatched:
+            labels = cluster([(placed[i]["lat"], placed[i]["lon"])
+                              for i in unmatched], eps, min_pts)
+            fallback = {}
+            for i, label in zip(unmatched, labels):
+                if label != NOISE:
+                    fallback.setdefault(label, []).append(i)
+            # key "dbscan:<label>" cannot collide with "osm:u:v"
+            for label, idxs in fallback.items():
+                groups[f"dbscan:{label}"] = idxs
+    else:
+        labels = cluster([(r["lat"], r["lon"]) for r in placed], eps, min_pts)
+        for i, r in enumerate(placed):
+            if labels[i] != NOISE:
+                groups.setdefault(labels[i], []).append(i)
 
     links = []
     for members in groups.values():
