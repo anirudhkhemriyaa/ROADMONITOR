@@ -1,0 +1,35 @@
+﻿# ── Android / Gradle ──────────────────────────────────────────────────────────
+**/build/
+**/.gradle/
+**/local.properties
+**/.idea/
+*.jks
+*.keystore
+*.apk
+*.aab
+
+# ── Python / Backend ──────────────────────────────────────────────────────────
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+
+# ── Node / Web ────────────────────────────────────────────────────────────────
+**/node_modules/
+**/dist/
+**/.env
+**/.env.local
+**/.env.*.local
+
+# ── Drive data (large raw sensor CSVs — NOT tracked in git) ───────────────────
+# *.summary.json and *_markers.csv are small metadata files and ARE committed.
+data/raw/*.csv
+# Exception: markers CSV files are tiny annotation files -- keep them tracked
+!data/raw/*_markers.csv
+
+# ── OS junk ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
