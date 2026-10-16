@@ -203,3 +203,58 @@ python -m roadmonitor.main        # http://localhost:8000  (legacy + /api/v1 + /
 pytest tests -q                   # 36 tests
 ```
 Docker (db + redis; api service staged for Postgres): `docker compose up`.
+
+
+## Road Anomaly Priority Pipeline (rule-based, Gwalior-focused)
+
+Additive to everything above: segments roads, flags per-segment defects from
+phone sensors, and produces a repair-priority ranking. Everything is
+**rule-based and explicitly labelled `threshold-based, unvalidated`** in every
+API response - no accuracy claims until labelled data exists (the same I/O
+schema then doubles as the ML plug-in point).
+
+Chain: `ingest -> detect -> severity -> mapmatch -> aggregate -> priority`
+
+- **roadnet** (`anomaly/roadnet.py`): OSMnx drive network + POIs (school,
+  hospital, college, university, dormitory, marketplace, bus_station),
+  cached to GeoJSON; stable `seg_<hash>` ids; user-uploaded GeoJSON
+  networks supported; offline **sample grid** fallback (Gwalior centre,
+  source=`sample`) so demos/tests run without the geo stack.
+- **mapmatch** (`anomaly/mapmatch.py`): default = nearest-edge snap against
+  a 15 m radius (config `anomaly.match_radius_m`); swap-in matchers keep the
+  same event contract.
+- **detect** (`anomaly/detect.py`): pothole / speed-bump / rough-roads rules,
+  gyro + speed + refractory gates, per-vehicle magnitude scaling and
+  normalization anchors from `config.yaml`.
+- **aggregate** (`anomaly/aggregate.py`): per-segment counts, mean/p95
+  severity, unique trips + vehicle types; **confirmed needs >= 3 independent
+  trips** (`min_confirm_trips`); events within `boundary_grace_m` (200 m) of
+  a trip's recorded start/end are flagged - the app's 150 m privacy trim
+  makes that region sparse and it cannot confirm a segment.
+- **priority** (`anomaly/priority.py`, in `config.yaml anomaly.priority_weights`):
+  `w1*severity + w2*frequency + w3*POI + w4*road_class + w5*vulnerable_users`.
+  POI impact is measured **along the road network** (graph distance, not
+  straight-line) within `poi_buffer_m` (250 m); weights sum to 1 and are
+  AHP-tunable.
+
+### API (additive group, no legacy endpoint touched)
+```
+POST /api/v1/roads/load?mode=sample|osmnx|upload:<geojson>   # (re)load network
+POST /api/v1/roads/network                                   # upload GeoJSON network
+POST /api/v1/roads/recompute                                 # aggregate + priority run
+GET  /api/v1/roads/segments?min_priority=&poi_type=&within_m=&vehicle_type=&confirmed_only=
+GET  /api/v1/roads/ranking                                   # ranked repair list
+GET  /api/v1/roads/geojson                                   # map features, priority-coloured
+GET  /priority-map                                           # Leaflet dashboard (OSM tiles)
+```
+
+### Demo without any real data
+```
+cd backend
+.venv\Scripts\python.exe scripts\simulate_trips.py          # fake trips on sample grid
+.venv\Scripts\python.exe scripts\simulate_trips.py --source osmnx   # real net (needs osmnx)
+# then: python -m roadmonitor.main and open http://localhost:8000/priority-map
+pytest tests -q                   # 58 tests (13 detect + 9 pipeline + 36 phases A-E)
+```
+Simulated trips carry planted potholes/bumps/rough zones on interior road
+positions (demo data only - never presented as real road conditions).
