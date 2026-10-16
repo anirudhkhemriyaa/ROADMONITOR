@@ -1,3 +1,9 @@
 fastapi==0.115.0
 uvicorn==0.30.6
 python-multipart==0.0.9
+pyyaml==6.0.3
+# Phase C (Postgres / Celery), activated with docker-compose:
+# sqlalchemy==2.0.35
+# psycopg2-binary==2.9.9
+# celery==5.4.2
+# redis==5.1.2

@@ -1,0 +1,35 @@
+# Road Monitor backend configuration.
+# Every threshold lives here (mirrors android pipeline defaults, plan section 3).
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+db:
+  # Dev default runs embedded SQLite so the laptop needs no install.
+  # Production / Phase C: postgresql+psycopg://USER:PASS@localhost:5432/roadmonitor
+  # (PostGIS DDL: backend/sql/schema_postgres.sql, compose: docker-compose.yml)
+  url: "sqlite:///./data/roadmonitor.db"
+
+api:
+  request: {max_body_mb: 25}
+  device_key_bytes: 32
+  auth: {require_device_key: false}   # Phase A app does not send keys yet; tighten when it does
+  insert_batch_size: 1000
+
+# ---- thresholds consumed from Phase C processing onward ----
+sampling: {accel_hz: 50, gps_hz: 1}
+filter: {bandpass_low: 0.5, bandpass_high: 20.0, order: 2, gravity_lp_hz: 0.5}
+speed: {min_kmh: 5.0, max_kmh: 120.0}
+event:
+  abs_threshold_ms2: 3.0
+  sigma_k: 3.5
+  sigma_window_s: 5.0
+  refractory_ms: 300
+  pulse_width_ms: {pothole: [40, 200], bump: [200, 600]}
+roughness: {bin_m: 10, speed_alpha: 0.7, min_samples_per_bin: 20}
+gps: {max_accuracy_m: 25, trim_start_end_m: 150}
+mapmatch: {radius_m: 20, min_confidence: 0.5}
+aggregate: {recency_tau_days: 60, conf_k: 2.0}
+cluster: {eps_m: 8, min_samples: 2, confirm_min_devices: 2, confirm_min_trips: 3}
+classes: {method: percentile, cuts: [50, 75, 90]}
