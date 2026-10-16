@@ -134,3 +134,26 @@ def trips_list(limit: int = 50):
     """Ops listing (dashboard / debugging). Newest first."""
     limit = max(1, min(limit, 500))
     return {"trips": get_store().list_trips(limit)}
+
+
+# ---- Phase C: processing results ------------------------------------------------
+
+@router.get("/analysis/links", dependencies=[Depends(check_device_key)])
+def analysis_links(min_status: str = "candidate", limit: int = 1000):
+    """Aggregated road links (roughness classes + confidence)."""
+    limit = max(1, min(limit, 5000))
+    return get_store().links(min_status, limit)
+
+
+@router.get("/analysis/events", dependencies=[Depends(check_device_key)])
+def analysis_events(min_status: str = "candidate", limit: int = 1000):
+    """Clustered events (suspected potholes / breakers)."""
+    limit = max(1, min(limit, 5000))
+    return get_store().event_clusters(min_status, limit)
+
+
+@router.post("/analysis/recompute", dependencies=[Depends(check_device_key)])
+def analysis_recompute():
+    """Inline recompute (dev). In the docker deployment Celery runs this."""
+    from .process import recompute_all
+    return recompute_all()

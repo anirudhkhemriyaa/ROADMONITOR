@@ -27,9 +27,9 @@ event:
   sigma_window_s: 5.0
   refractory_ms: 300
   pulse_width_ms: {pothole: [40, 200], bump: [200, 600]}
-roughness: {bin_m: 10, speed_alpha: 0.7, min_samples_per_bin: 20}
+roughness: {bin_m: 10, speed_alpha: 0.7, min_samples_per_bin: 20, speed_floor_mps: 1.5}
 gps: {max_accuracy_m: 25, trim_start_end_m: 150}
 mapmatch: {radius_m: 20, min_confidence: 0.5}
-aggregate: {recency_tau_days: 60, conf_k: 2.0}
+aggregate: {recency_tau_days: 60, conf_k: 2.0, conf_trips_weight: 0.5, ref_speed_mps: 8.33}
 cluster: {eps_m: 8, min_samples: 2, confirm_min_devices: 2, confirm_min_trips: 3}
 classes: {method: percentile, cuts: [50, 75, 90]}

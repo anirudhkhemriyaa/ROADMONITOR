@@ -86,11 +86,46 @@ CREATE TABLE IF NOT EXISTS segments (
     n         INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_segments_trip ON segments(trip_id);
+CREATE TABLE IF NOT EXISTS road_links (
+    link_id     TEXT PRIMARY KEY,
+    lat         REAL,
+    lon         REAL,
+    score_raw   REAL,
+    score_norm  REAL,
+    class       TEXT,
+    n_bins      INTEGER,
+    n_trips     INTEGER,
+    n_devices   INTEGER,
+    status      TEXT,
+    confidence  REAL,
+    last_seen_ms INTEGER,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_clusters (
+    cluster_id  TEXT PRIMARY KEY,
+    lat         REAL,
+    lon         REAL,
+    n_events    INTEGER,
+    n_trips     INTEGER,
+    n_devices   INTEGER,
+    peak_med    REAL,
+    width_med   REAL,
+    type        TEXT,
+    recency     REAL,
+    status      TEXT,
+    confidence  REAL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def ts_ms(iso: str) -> float:
+    """Parses the received_at iso timestamp to unix ms (None-safe upstream)."""
+    return datetime.fromisoformat(iso).timestamp() * 1000.0
 
 
 def _sqlite_path(url: str) -> Path:
@@ -256,6 +291,106 @@ class Store:
             d.pop("received_at", None)
             out.append(d)
         return out
+
+    def mark_trip_status(self, trip_id: str, status: str) -> None:
+        with self.lock:
+            self.conn.execute("UPDATE trips SET status=? WHERE trip_id=?", (status, trip_id))
+            self.conn.commit()
+
+    # ---- aggregate tables + accessors (Phase C) --------------------------------
+
+    def all_segments_with_meta(self) -> list:
+        """Every segment bin with the owning trip's metadata for aggregation."""
+        rows = self.conn.execute(
+            "SELECT s.id, s.trip_id, t.device_id, s.ts_start, s.ts_end, s.lat, s.lon,"
+            " s.dist_m, s.rms, s.std, s.max_a AS max, s.p95, s.kurtosis, s.band_0_5,"
+            " s.band_5_15, s.band_15p, s.speed_mean, s.n, t.received_at"
+            " FROM segments s JOIN trips t ON t.trip_id = s.trip_id"
+            " ORDER BY s.trip_id, s.id",
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["row_key"] = d.pop("id")
+            ts = d.get("received_at")
+            d["received_at_ms"] = ts_ms(ts) if ts else None
+            out.append(d)
+        return out
+
+    def all_events_with_meta(self) -> list:
+        rows = self.conn.execute(
+            "SELECT e.id, e.trip_id, t.device_id, e.ts, e.lat, e.lon, e.dist_m,"
+            " e.peak, e.p2p, e.width_ms, e.jerk, e.energy, e.speed, e.gyro_peak,"
+            " e.speed_drop, e.type_hint, t.received_at"
+            " FROM events e JOIN trips t ON t.trip_id = e.trip_id"
+            " ORDER BY e.trip_id, e.id",
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["row_key"] = d.pop("id")
+            ts = d.get("received_at")
+            d["received_at_ms"] = ts_ms(ts) if ts else None
+            out.append(d)
+        return out
+
+    def replace_links(self, links: list) -> None:
+        with self.lock:
+            self.conn.isolation_level = None
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                self.conn.execute("DELETE FROM road_links")
+                self.conn.executemany(
+                    "INSERT INTO road_links (link_id, lat, lon, score_raw, score_norm,"
+                    " class, n_bins, n_trips, n_devices, status, confidence,"
+                    " last_seen_ms, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [(
+                        l["link_id"], l["lat"], l["lon"], l["score_raw"],
+                        l["score_norm"], l["class"], l["n_bins"], l["n_trips"],
+                        l["n_devices"], l["status"], l["confidence"],
+                        l["last_seen_ms"], _now(),
+                    ) for l in links],
+                )
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+
+    def links(self, min_status: str = "candidate", limit: int = 1000) -> list:
+        sql = ("SELECT * FROM road_links WHERE status=?" if min_status in ("candidate", "confirmed")
+               else "SELECT * FROM road_links")
+        args = (min_status, limit) if min_status in ("candidate", "confirmed") else (limit,)
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY confidence DESC, score_norm DESC LIMIT ?", args)]
+
+    def replace_event_clusters(self, clusters: list) -> None:
+        with self.lock:
+            self.conn.isolation_level = None
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                self.conn.execute("DELETE FROM event_clusters")
+                self.conn.executemany(
+                    "INSERT INTO event_clusters (cluster_id, lat, lon, n_events,"
+                    " n_trips, n_devices, peak_med, width_med, type, recency,"
+                    " status, confidence, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [(
+                        c["cluster_id"], c["lat"], c["lon"], c["n_events"],
+                        c["n_trips"], c["n_devices"], c["peak_med"], c["width_med"],
+                        c["type"], c["recency"], c["status"], c["confidence"],
+                        _now(),
+                    ) for c in clusters],
+                )
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+
+    def event_clusters(self, min_status: str = "candidate", limit: int = 1000) -> list:
+        sql = ("SELECT * FROM event_clusters WHERE status=?" if min_status in ("candidate", "confirmed")
+               else "SELECT * FROM event_clusters")
+        args = (min_status, limit) if min_status in ("candidate", "confirmed") else (limit,)
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY confidence DESC LIMIT ?", args)]
 
 
 _STORE = None

@@ -48,6 +48,9 @@ def _payload(trip_id="trip-1", n_events=2, n_segments=3):
 def client():
     from fastapi.testclient import TestClient
     from roadmonitor.main import application
+    from roadmonitor.store import Store, set_store
+    # make the process-wide store deterministic per test module
+    set_store(Store(os.environ["ROADMONITOR_DB"]))
     return TestClient(application)
 
 
