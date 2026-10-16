@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Road Monitor — Anomaly Priority Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg:#0f1420; --panel:#171e2e; --text:#dbe4f0; --muted:#8fa0b8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; }
+  #map { flex:1; }
+  .side { width:430px; background:var(--panel); overflow-y:auto; padding:14px; border-left:1px solid #26314a; }
+  h1 { font-size:16px; margin:0 0 10px; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  select, button { background:#232c42; color:var(--text); border:1px solid #33405e; border-radius:6px; padding:5px 9px; cursor:pointer; }
+  label { font-size:12px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; color:var(--muted); font-weight:600; padding:4px 6px; border-bottom:1px solid #33405e; position:sticky; top:0; background:var(--panel); }
+  td { padding:4px 6px; border-bottom:1px solid #223047; }
+  tr.row:hover { background:#202a40; cursor:pointer; }
+  .pill { border-radius:9px; padding:1px 7px; font-size:11px; background:#223049; }
+  .confirmed { background:#245c39; }
+  .muted { color:var(--muted); font-size:11.5px; }
+  #stats { color:var(--muted); font-size:12.5px; margin-bottom:8px; }
+</style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="side">
+    <h1>Repair-priority map (rule-based, unvalidated)</h1>
+    <div id="stats">loading…</div>
+    <div class="bar">
+      <select id="f-poi"><option value="">POI: any</option>
+        <option>hospital</option><option>school</option><option>college</option>
+        <option>university</option><option>dormitory</option>
+        <option>marketplace</option><option>bus_station</option></select>
+      <select id="f-veh"><option value="">vehicle: any</option>
+        <option>bike</option><option>car</option><option>bus</option>
+        <option>e_rickshaw</option></select>
+      <label><input type="checkbox" id="f-conf" checked> confirmed only</label>
+      <button onclick="load()">⟳ refresh</button>
+      <button onclick="recompute()" title="re-run network+aggregate+priority">⚙ recompute</button>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>road</th><th class="num">sev</th><th>nearest POI</th><th class="num">trips</th><th class="num">prio</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="muted">priority = w·severity + w·frequency + w·POI(250 m along-network) + w·road class + w·vulnerable users.
+       Thresholds per vehicle type in config.yaml. No accuracy claim: validation pending.</p>
+  </div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'© OpenStreetMap contributors', maxZoom:19}).addTo(map);
+const layers = [];
+const API = '/api/v1/roads';
+
+async function load() {
+  layers.forEach(l => map.removeLayer(l)); layers.length = 0;
+  const poi = document.getElementById('f-poi').value;
+  const veh = document.getElementById('f-veh').value;
+  const conf = document.getElementById('f-conf').checked;
+  const g = await fetch(`${API}/geojson${conf ? '?confirmed_only=true' : ''}`).then(r => r.json());
+  const ranking = await fetch(`${API}/ranking?confirmed_only=${conf}&vehicle_type=${veh}`).then(r => r.json());
+  const shown = ranking.filter(r => !poi || r.poi_type === poi);
+
+  let bounds = null;
+  g.features.forEach(f => {
+    const latlngs = f.geometry.coordinates.map(c => [c[1], c[0]]);
+    const p = f.properties;
+    if (p.priority == null || p.priority === undefined || p.priority < 0) return;
+    const line = L.polyline(latlngs, {color: p.color || '#888', weight: 7, opacity: 0.9}).addTo(map);
+    line.bindPopup(`<b>${p.name || p.segment_id}</b><br>
+      priority <b>${(+p.priority).toFixed(3)}</b> · class ${p.road_class || ''}<br>
+      severity(p95) ${(+p.sev_p95).toFixed(2)} · ${p.n_trips} trips · ${p.n_events} events<br>
+      ${p.confirmed ? '<span style="color:#7fe05f">confirmed</span>' : 'candidate'}
+      <br><span class="muted">threshold-based, unvalidated</span>`);
+    layers.push(line);
+    bounds = bounds ? bounds.extend(latlngs) : L.latLngBounds(latlngs);
+  });
+  if (bounds) map.fitBounds(bounds.pad(0.2));
+  else map.setView([26.2183, 78.1828], 14);
+
+  document.getElementById('stats').textContent =
+    `${shown.length} ranked · ${g.features.length} scored segments` + (poi ? ` · near ${poi}` : '');
+
+  const tb = document.getElementById('rows'); tb.innerHTML = '';
+  const byId = {};
+  g.features.forEach(f => { byId[f.properties.segment_id] = f; });
+  shown.slice(0, 200).forEach(r => {
+    const tr = document.createElement('tr'); tr.className = 'row';
+    tr.innerHTML = `<td>${r.rank}</td>
+      <td>${r.road_name || r.segment_id.slice(0,10)} ${r.confirmed ? '<span class="pill confirmed">✓</span>' : '<span class="pill">~</span>'}</td>
+      <td class="num">${r.severity == null ? '—' : (+r.severity).toFixed(2)}</td>
+      <td class="muted">${r.nearest_poi || '—'}</td>
+      <td class="num">${r.trip_count ?? '—'}</td>
+      <td class="num"><b>${r.priority?.toFixed(3)}</b></td>`;
+    tr.onclick = () => {
+      const f = byId[r.segment_id];
+      if (!f) return;
+      const lls = f.geometry.coordinates.map(c => [c[1], c[0]]);
+      map.fitBounds(L.latLngBounds(lls).pad(0.5), {maxZoom: 18});
+    };
+    tb.appendChild(tr);
+  });
+}
+
+async function recompute() {
+  document.getElementById('stats').textContent = 'recomputing…';
+  await fetch(`${API}/recompute?mode=auto`, {method:'POST'});
+  load();
+}
+document.getElementById('f-poi').onchange = load;
+document.getElementById('f-veh').onchange = load;
+document.getElementById('f-conf').onchange = load;
+load();
+</script>
+</body>
+</html>

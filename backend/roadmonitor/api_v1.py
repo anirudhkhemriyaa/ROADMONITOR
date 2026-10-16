@@ -167,3 +167,195 @@ def analysis_recompute():
     """Inline recompute (dev). In the docker deployment Celery runs this."""
     from .process import recompute_all
     return recompute_all()
+
+
+# ---- Road Anomaly Priority Pipeline (additive, no legacy endpoint touched) ------
+
+COLOR_STOPS = [  # priority band -> colour (green -> red)
+    (0.75, "#ef4d4d"), (0.55, "#f2b23e"), (0.35, "#a8d841"), (0.0, "#3fdc74"),
+]
+
+
+def _color(priority):
+    for stop, c in COLOR_STOPS:
+        if priority >= stop:
+            return c
+    return "#3fdc74"
+
+
+@router.post("/roads/load")
+def roads_load(mode: str = "auto"):
+    """(Re)load the road network + POIs into the store.
+    mode: 'sample' (offline demo grid) | 'osmnx' (needs osmnx installed)
+          | 'upload:<path/to/file.geojson>' | 'auto'."""
+    from .anomaly import roadnet as rn
+    net = rn.load_network(get_store(), mode)
+    return {"source": net.get("source"), "segments": len(net["segments"]),
+            "pois": len(net["pois"])}
+
+
+@router.post("/roads/network")
+async def roads_upload_network(request):
+    """User-uploaded road network (GeoJSON FeatureCollection: LineStrings =
+    segments, Points with poi_type = POIs)."""
+    from .anomaly import roadnet as rn
+    import json
+    body = await request.body()
+    if body[:2] == b"\x1f\x8b":
+        import gzip
+        body = gzip.decompress(body)
+    import tempfile, os
+    f = tempfile.NamedTemporaryFile(suffix=".geojson", delete=False)
+    f.write(body)
+    f.close()
+    net = rn.load_geojson_file(f.name, source="upload")
+    rn.save_to_store(get_store(), net, source="upload")
+    os.unlink(f.name)
+    return {"source": "upload", "segments": len(net["segments"]),
+            "pois": len(net["pois"])}
+
+
+@router.post("/roads/recompute")
+def roads_recompute(mode: str = "auto"):
+    """detect→...→priority full run trigger (dev convenience; simulate_trips.py
+    calls the same functions directly)."""
+    from .anomaly.pipeline import recompute as rec
+    from .anomaly.schema import ensure_tables
+    from .config import CFG
+    ensure_tables(get_store())
+    return rec(get_store(), CFG, net_mode=mode)
+
+
+@router.get("/roads/segments")
+def roads_segments(min_priority: float = 0.0, poi_type: str = "",
+                   within_m: int = 250, vehicle_type: str = "",
+                   confirmed_only: bool = False, limit: int = 2000):
+    """Segment stats filtered by priority / nearby POI type (network dist)
+    / vehicle type / confirmation."""
+    store = get_store()
+    sql = ("SELECT st.*, ns.name, ns.road_class FROM segment_stats st JOIN"
+           " net_segments ns ON ns.segment_id = st.segment_id"
+           " WHERE st.priority >= ?")
+    args = [min_priority]
+    if confirmed_only:
+        sql += " AND st.confirmed = 1"
+    sql += " ORDER BY st.priority DESC LIMIT ?"
+    args.append(max(1, min(limit, 5000)))
+    rows = [dict(r) for r in store.conn.execute(sql, args)]
+    if poi_type:
+        rows = [r for r in rows if _nearest_poi(store, r["segment_id"],
+                                                poi_type, within_m) is not None]
+    if vehicle_type:
+        rows = [r for r in rows if store.conn.execute(
+            "SELECT COUNT(*) FROM anomaly_events WHERE segment_id=?"
+            " AND vehicle_type=?", (r["segment_id"], vehicle_type)).fetchone()[0] > 0]
+    out = []
+    for r in rows:
+        comps = json.loads(r.pop("components") or "{}") or {}
+        r["priority_terms"] = comps.get("priority_terms") or {}
+        r["color"] = _color(r["priority"] or 0.0)
+        out.append(r)
+    return out
+
+
+def _nearest_poi(store, segment_id: str, poi_type: str, within_m: int):
+    """Re-queries the network-distance POI match for one segment using the
+    stored priority-term metadata first, then graph recompute as fallback."""
+    comps = store.conn.execute(
+        "SELECT components FROM segment_stats WHERE segment_id=?",
+        (segment_id,)).fetchone()
+    terms = (json.loads(comps[0]) or {}).get("priority_terms", {}) if comps else {}
+    if terms.get("poi_type") == poi_type:
+        d = terms.get("poi_dist_m")
+        if d is None or d <= within_m:
+            return terms.get("poi_name")
+    from .anomaly.priority import poi_impact, _bbox_segments  # recomputed live
+    from .anomaly import roadnet as rn
+    from .config import CFG
+    net = rn.load_from_store(store)
+    if not net["segments"]:
+        return None
+    poi = store.conn.execute(
+        "SELECT poi_id, poi_type, lat, lon, name FROM net_pois"
+        " WHERE poi_type=? LIMIT 100", (poi_type,)).fetchall()
+    idx, _ = _bbox_segments(net["segments"])
+    for p in [dict(zip(("poi_id", "poi_type", "lat", "lon", "name"), r))
+              for r in poi]:
+        if segment_id in poi_impact(p, net, idx, CFG):
+            return p.get("name") or p["poi_type"]
+    return None
+
+
+@router.get("/roads/ranking")
+def roads_ranking(min_priority: float = 0.0, confirmed_only: bool = False,
+                  vehicle_type: str = "", limit: int = 100):
+    """Ranked repair list: rank, road name, severity, nearest POI + its
+    network distance, priority, trip count."""
+    store = get_store()
+    sql = ("SELECT st.*, ns.name, ns.road_class FROM segment_stats st"
+           " JOIN net_segments ns ON ns.segment_id = st.segment_id"
+           " WHERE st.priority >= ?")
+    args = [min_priority]
+    if confirmed_only:
+        sql += " AND st.confirmed = 1"
+    if vehicle_type:
+        sql += (" AND EXISTS (SELECT 1 FROM anomaly_events ae WHERE"
+                " ae.segment_id = st.segment_id AND ae.vehicle_type = ?)")
+        args.append(vehicle_type)
+    sql += " ORDER BY st.priority DESC LIMIT ?"
+    args.append(max(1, min(limit, 1000)))
+    out = []
+    rank0 = None
+    rows = [dict(r) for r in store.conn.execute(sql, args)]
+    rows.sort(key=lambda r: (-(r["priority"] or 0.0), -(r["sev_p95"] or 0.0)))
+    for i, r in enumerate(rows, 1):
+        comps = json.loads(r.pop("components") or "{}") or {}
+        terms = comps.get("priority_terms") or {}
+        out.append({
+            "rank": i,
+            "road_name": r.get("name"),
+            "segment_id": r["segment_id"],
+            "severity": r.get("sev_p95"),
+            "nearest_poi": terms.get("poi_name"),
+            "poi_type": terms.get("poi_type"),
+            "poi_dist_m": terms.get("poi_dist_m"),
+            "priority": r.get("priority"),
+            "trip_count": r.get("n_trips"),
+            "n_events": r.get("n_events"),
+            "confirmed": bool(r.get("confirmed")),
+            "method": "threshold-based, unvalidated",
+        })
+    return out
+
+
+@router.get("/roads/geojson")
+def roads_geojson(min_priority: float = 0.0, confirmed_only: bool = False):
+    """Map-ready FeatureCollection; segments coloured by priority."""
+    store = get_store()
+    sql = ("SELECT st.priority, st.sev_mean, st.sev_p95, st.n_events, st.n_trips,"
+           " st.confirmed, ns.segment_id, ns.geom, ns.name, ns.road_class"
+           " FROM segment_stats st JOIN net_segments ns ON"
+           " ns.segment_id = st.segment_id WHERE st.priority >= ?")
+    args = [min_priority]
+    if confirmed_only:
+        sql += " AND st.confirmed = 1"
+    feats = []
+    for r in store.conn.execute(sql, args):
+        d = dict(r)
+        props = {"segment_id": d["segment_id"], "name": d["name"],
+                 "road_class": d["road_class"], "priority": d["priority"],
+                 "sev_p95": d["sev_p95"], "n_trips": d["n_trips"],
+                 "n_events": d["n_events"], "confirmed": bool(d["confirmed"]),
+                 "color": _color(d["priority"] or 0.0),
+                 "method": "threshold-based, unvalidated"}
+        feats.append({"type": "Feature",
+                      "geometry": _wkt_to_geojson(d["geom"]),
+                      "properties": props})
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def _wkt_to_geojson(wkt: str) -> dict:
+    body = wkt[wkt.index("(") + 1:wkt.rindex(")")]
+    pts = [[float(lo), float(la)] for lo, la in
+           (p.split() for p in body.split(", "))]
+    return {"type": "LineString", "coordinates": pts}

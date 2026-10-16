@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 _DASHBOARD_HTML = Path(__file__).resolve().parent / "static" / "dashboard.html"
+_PRIORITY_MAP_HTML = Path(__file__).resolve().parent / "static" / "anomaly_dashboard.html"
 
 # legacy FastAPI app stays exactly as it is (dashboard, live stream, /upload)
 from app import app as application  # noqa: E402  (cwd = backend/, like app.py)
@@ -38,6 +39,10 @@ def prepare() -> None:
         application.include_router(router)
     if not any(getattr(r, "path", "") == "/dashboard" for r in application.routes):
         application.get("/dashboard")(_dashboard)
+    if not any(getattr(r, "path", "") == "/priority-map" for r in application.routes):
+        def _priority_map() -> FileResponse:
+            return FileResponse(_PRIORITY_MAP_HTML, media_type="text/html")
+        application.get("/priority-map")(_priority_map)
     _application_ready = True
 
 
