@@ -34,6 +34,39 @@ aggregate: {recency_tau_days: 60, conf_k: 2.0, conf_trips_weight: 0.5, ref_speed
 cluster: {eps_m: 8, min_samples: 2, confirm_min_devices: 2, confirm_min_trips: 3}
 classes: {method: percentile, cuts: [50, 75, 90]}
 
+# ---- Road Anomaly Priority Pipeline (server-side, rule-based) ----
+# Per-vehicle_type threshold blocks. Values are engineering defaults pending
+# calibration with real multi-vehicle data; outputs carry
+# "threshold-based, unvalidated".
+anomaly:
+  sample_hz: 50
+  base:                                  # baseline block (bike-like)
+    dip_abs_ms2: 4.0        # pothole: downward dip must exceed this
+    spike_abs_ms2: 9.0      # impact spike must exceed this
+    pothole_window_ms: [40, 200]
+    bump_window_ms: [200, 600]
+    bump_peak_abs_ms2: 5.0  # bump peak range top (below spike level)
+    rough_rms_ms2: 2.4      # sustained RMS above this = rough road
+    rough_window_ms: 1000   # sustainability window for rough rule
+    rough_overlap: 0.6      # required fraction of window above threshold
+    gyro_z_rad_s: 0.5       # sharp turn/swerve gate
+    gyro_shield_ms: 400     # drop events this close to a turn
+    refractory_ms: 300      # min spacing between events of any type
+  vehicle_scale:              # multiplies the magnitude thresholds above
+    bike: 1.0
+    car: 1.2
+    bus: 1.5
+    e_rickshaw: 0.75
+
+severity:
+  weights: {p95: 0.6, rms: 0.4}   # weighted mix; AHP-tunable later
+  # normalization anchors (m/s²) per vehicle - calibration pending
+  refs:
+    bike: {p95: 6.0, rms: 2.5}
+    car: {p95: 4.5, rms: 1.8}
+    bus: {p95: 3.5, rms: 1.4}
+    e_rickshaw: {p95: 7.0, rms: 3.0}
+
 # ---- Phase E validation (python -m roadmonitor.validation) ----
 validation:
   pos_tol_m: 25            # link positions must agree within this to be "the same link"
