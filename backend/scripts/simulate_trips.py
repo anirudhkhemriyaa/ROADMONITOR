@@ -80,25 +80,56 @@ def _rows_along(coords, legs, total, speed_mps, vert_fn, t0, jitter_m=1.5):
     return rows
 
 
-def make_vehicle_plan():
-    """Routes on the sample grid with planted interior defects."""
+def make_vehicle_plan(full_coverage=True):
+    """Routes on the sample grid with planted interior defects.
+    Covers both horizontal and vertical streets across the entire grid."""
     def pt(row, col):
         return (C_LAT + row * STEP, C_LON + col * STEP)
 
-    return {
-        "route1": {"pts": [pt(0, 0), pt(0, 1), pt(0, 2), pt(0, 3), pt(0, 4)],
-                   "defects": [("pothole", 0.4), ("pothole", 0.7)],
-                   "vehicle": "bike", "speed": 8.0},
-        "route2": {"pts": [pt(1, 0), pt(1, 1), pt(1, 2), pt(1, 3), pt(1, 4)],
-                   "defects": [("bump", 0.35), ("bump", 0.55), ("bump", 0.75)],
-                   "vehicle": "car", "speed": 11.0},
-        "route3": {"pts": [pt(3, 0), pt(3, 1), pt(3, 2), pt(3, 3), pt(3, 4)],
-                   "defects": [("rough", 0.3, 0.8)],
-                   "vehicle": "bus", "speed": 7.0},
-        "route4": {"pts": [pt(4, 0), pt(4, 1), pt(4, 2), pt(4, 3)],
-                   "defects": [("bump", 0.3), ("pothole", 0.6)],
-                   "vehicle": "e_rickshaw", "speed": 5.5},
+    plan = {
+        # Horizontal East-West routes
+        "h_route0": {"pts": [pt(0, 0), pt(0, 1), pt(0, 2), pt(0, 3), pt(0, 4)],
+                     "defects": [("pothole", 0.4), ("pothole", 0.7)],
+                     "vehicle": "bike", "speed": 8.0},
+        "h_route1": {"pts": [pt(1, 0), pt(1, 1), pt(1, 2), pt(1, 3), pt(1, 4)],
+                     "defects": [("bump", 0.35), ("bump", 0.55), ("bump", 0.75)],
+                     "vehicle": "car", "speed": 11.0},
+        "h_route2": {"pts": [pt(2, 0), pt(2, 1), pt(2, 2), pt(2, 3), pt(2, 4)],
+                     "defects": [("bump", 0.3), ("pothole", 0.6)],
+                     "vehicle": "e_rickshaw", "speed": 6.0},
+        "h_route3": {"pts": [pt(3, 0), pt(3, 1), pt(3, 2), pt(3, 3), pt(3, 4)],
+                     "defects": [("rough", 0.3, 0.8)],
+                     "vehicle": "bus", "speed": 7.0},
+        "h_route4": {"pts": [pt(4, 0), pt(4, 1), pt(4, 2), pt(4, 3), pt(4, 4)],
+                     "defects": [("pothole", 0.5)],
+                     "vehicle": "bike", "speed": 7.5},
+
+        # Vertical North-South cross routes
+        "v_route0": {"pts": [pt(0, 0), pt(1, 0), pt(2, 0), pt(3, 0), pt(4, 0)],
+                     "defects": [("bump", 0.4), ("pothole", 0.65)],
+                     "vehicle": "car", "speed": 9.0},
+        "v_route1": {"pts": [pt(0, 1), pt(1, 1), pt(2, 1), pt(3, 1), pt(4, 1)],
+                     "defects": [("pothole", 0.3), ("bump", 0.7)],
+                     "vehicle": "bike", "speed": 7.0},
+        "v_route2": {"pts": [pt(0, 2), pt(1, 2), pt(2, 2), pt(3, 2), pt(4, 2)],
+                     "defects": [("pothole", 0.45), ("pothole", 0.65)],
+                     "vehicle": "e_rickshaw", "speed": 6.5},
+        "v_route3": {"pts": [pt(0, 3), pt(1, 3), pt(2, 3), pt(3, 3), pt(4, 3)],
+                     "defects": [("rough", 0.35, 0.75)],
+                     "vehicle": "bus", "speed": 7.5},
+        "v_route4": {"pts": [pt(0, 4), pt(1, 4), pt(2, 4), pt(3, 4), pt(4, 4)],
+                     "defects": [("bump", 0.5)],
+                     "vehicle": "car", "speed": 10.0},
+
+        # Zigzag / diagonal commuter routes
+        "diag_nw_se": {"pts": [pt(0, 0), pt(1, 1), pt(2, 2), pt(3, 3), pt(4, 4)],
+                       "defects": [("pothole", 0.5)],
+                       "vehicle": "bike", "speed": 8.0},
+        "zigzag": {"pts": [pt(1, 0), pt(1, 2), pt(3, 2), pt(3, 4)],
+                   "defects": [("bump", 0.4), ("pothole", 0.6)],
+                   "vehicle": "car", "speed": 8.5},
     }
+    return plan
 
 
 def _vert_fn_factory(route, dur_s):
