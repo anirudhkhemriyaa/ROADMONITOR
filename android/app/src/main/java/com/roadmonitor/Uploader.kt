@@ -158,6 +158,46 @@ object Uploader {
         for (t in loadTrips(ctx)) if (t.status != "uploaded") enqueue(ctx, t.tripId)
     }
 
+    /**
+     * Obtains or retrieves a persistent device key from the backend via
+     * POST /api/v1/devices/register. Cached in SharedPreferences.
+     */
+    @Synchronized
+    fun ensureDeviceKey(ctx: Context, base: String): String? {
+        val prefs = ctx.getSharedPreferences("rcm", Context.MODE_PRIVATE)
+        val cached = prefs.getString("device_key", null)
+        if (!cached.isNullOrBlank()) return cached
+
+        val phoneName = prefs.getString("phone", android.os.Build.MODEL) ?: android.os.Build.MODEL
+        return try {
+            val conn = URL(base.trimEnd('/') + "/api/v1/devices/register").openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.setRequestProperty("Content-Type", "application/json")
+            val payload = JSONObject().put("name", phoneName).toString().toByteArray()
+            conn.setFixedLengthStreamingMode(payload.size)
+            conn.outputStream.use { it.write(payload) }
+            val code = conn.responseCode
+            if (code in 200..299) {
+                val resp = conn.inputStream.bufferedReader().readText()
+                val json = JSONObject(resp)
+                val key = json.optString("device_key")
+                val devId = json.optString("device_id")
+                if (key.isNotBlank()) {
+                    prefs.edit()
+                        .putString("device_key", key)
+                        .putString("registered_device_id", devId)
+                        .apply()
+                    key
+                } else null
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // ---- worker -------------------------------------------------------------
 
     class TripUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
@@ -169,7 +209,7 @@ object Uploader {
             if (base.isBlank()) return Result.failure()
             val dir = driveDir(ctx)
             return try {
-                uploadTrip(dir, tripId, base)
+                uploadTrip(dir, tripId, base, ctx)
                 setStatus(ctx, tripId, "uploaded", "")
                 Result.success()
             } catch (e: IOException) {
@@ -186,7 +226,7 @@ object Uploader {
 
     /** Uploads one trip: /api/v1/trips (gzip) with legacy /upload fallback. */
     @Throws(IOException::class)
-    fun uploadTrip(dir: File, tripId: String, base: String) {
+    fun uploadTrip(dir: File, tripId: String, base: String, ctx: Context? = null) {
         val metaFile = findMeta(dir, tripId)
             ?: throw IOException("meta missing for trip $tripId")
         val meta = JSONObject(metaFile.readText())
@@ -195,7 +235,8 @@ object Uploader {
 
         if (events != null && segments != null) {
             try {
-                postTripV1(base, tripId, meta, events.readText(), segments.readText())
+                val deviceKey = ctx?.let { ensureDeviceKey(it, base) }
+                postTripV1(base, tripId, meta, events.readText(), segments.readText(), deviceKey)
                 return
             } catch (e: LegacyFallback) {
                 // old backend without /api/v1/trips -> legacy path below
@@ -247,6 +288,7 @@ object Uploader {
         meta: JSONObject,
         eventsText: String,
         segmentsText: String,
+        deviceKey: String? = null,
     ) {
         val events = trimByDistance(eventsText)
         val segments = trimByDistance(segmentsText)
@@ -265,6 +307,9 @@ object Uploader {
         conn.setRequestProperty("Content-Type", "application/json")
         conn.setRequestProperty("Content-Encoding", "gzip")
         conn.setRequestProperty("X-Trip-Id", tripId)     // idempotency key
+        if (!deviceKey.isNullOrBlank()) {
+            conn.setRequestProperty("X-Device-Key", deviceKey)
+        }
         conn.setFixedLengthStreamingMode(gz.size)
         conn.outputStream.use { it.write(gz) }
         val code = conn.responseCode
@@ -382,7 +427,7 @@ object Uploader {
     }
 
     /** Kept for compatibility with the original UI flow and the Termux scripts. */
-    fun uploadPending(dir: File, base: String): String {
+    fun uploadPending(dir: File, base: String, ctx: Context? = null): String {
         val csvs = dir.listFiles { f -> f.name.endsWith(".csv") && !f.name.endsWith("_markers.csv") }
             ?: return "no drives"
         var ok = 0
@@ -397,7 +442,7 @@ object Uploader {
             if (meta.optString("trip_id").isNotBlank()) {
                 // new-style trip: route through the normal idempotent path
                 try {
-                    uploadTrip(dir, meta.optString("trip_id"), base)
+                    uploadTrip(dir, meta.optString("trip_id"), base, ctx)
                     ok++
                 } catch (e: LegacyFallback) {
                     try {

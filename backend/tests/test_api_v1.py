@@ -69,6 +69,31 @@ def test_device_register(client):
     assert r.headers.get("content-type", "").startswith("application/json")
 
 
+def test_device_key_auth(client):
+    from roadmonitor.config import CFG
+    orig = CFG.get("api", {}).get("auth", {}).get("require_device_key", False)
+    try:
+        CFG.setdefault("api", {}).setdefault("auth", {})["require_device_key"] = True
+        # Unauthenticated request fails with 401
+        r_unauth = client.get("/api/v1/trips")
+        assert r_unauth.status_code == 401
+
+        # Register without key succeeds even when require_device_key is True
+        r_reg = client.post("/api/v1/devices/register", json={"name": "auth-phone"})
+        assert r_reg.status_code == 200
+        key = r_reg.json()["device_key"]
+
+        # Request with registered key succeeds
+        r_auth = client.get("/api/v1/trips", headers={"X-Device-Key": key})
+        assert r_auth.status_code == 200
+
+        # Request with invalid key fails with 401
+        r_bad = client.get("/api/v1/trips", headers={"X-Device-Key": "invalid-key"})
+        assert r_bad.status_code == 401
+    finally:
+        CFG["api"]["auth"]["require_device_key"] = orig
+
+
 def test_trip_upload_gzip_and_idempotency(client):
     payload = gzip.compress(json.dumps(_payload()).encode())
     r = client.post("/api/v1/trips", content=payload, headers={

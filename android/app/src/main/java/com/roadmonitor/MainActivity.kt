@@ -192,14 +192,18 @@ class MainActivity : Activity() {
     }
 
     private fun testConnection() {
-        val url = server.text.toString().trim().trimEnd('/') + "/ping"
+        val base = server.text.toString().trim()
+        val url = base.trimEnd('/') + "/ping"
         Thread {
             val msg = try {
                 val c = URL(url).openConnection() as HttpURLConnection
                 c.connectTimeout = 4000; c.readTimeout = 4000
                 val ok = c.responseCode == 200
                 c.disconnect()
-                if (ok) "Backend reachable" else "Backend answered HTTP ${c.responseCode}"
+                if (ok) {
+                    val key = Uploader.ensureDeviceKey(this@MainActivity, base)
+                    if (key != null) "Backend reachable (device registered)" else "Backend reachable"
+                } else "Backend answered HTTP ${c.responseCode}"
             } catch (e: Exception) {
                 "Cannot reach backend: ${e.message}"
             }
@@ -209,8 +213,10 @@ class MainActivity : Activity() {
 
     private fun uploadNow() {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        prefs.edit().putString("server", server.text.toString().trim()).apply()
+        val s = server.text.toString().trim()
+        prefs.edit().putString("server", s).apply()
         LoggerService.uploadStatus = "queueing..."
+        Thread { Uploader.ensureDeviceKey(this, s) }.start()
         Uploader.enqueuePending(this)
     }
 

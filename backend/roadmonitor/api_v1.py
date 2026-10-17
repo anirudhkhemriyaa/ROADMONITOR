@@ -34,7 +34,7 @@ class DeviceRegisterIn(BaseModel):
     name: str = ""
 
 
-@router.post("/devices/register", dependencies=[Depends(check_device_key)])
+@router.post("/devices/register")
 def device_register(body: DeviceRegisterIn):
     """Returns a per-device secret once. Only its sha256 is stored."""
     return get_store().register_device(body.name)
