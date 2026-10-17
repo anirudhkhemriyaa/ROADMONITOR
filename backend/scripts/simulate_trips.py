@@ -155,9 +155,14 @@ def main():
     ap.add_argument("--source", choices=["sample", "osmnx"], default="sample")
     ap.add_argument("--trips", type=int, default=4, help="trips per route")
     ap.add_argument("--place", default="Gwalior, Madhya Pradesh, India")
+    ap.add_argument("--db", default=None, help="sqlite db URL or None for active store")
     args = ap.parse_args()
 
-    store = Store(f"sqlite:///./data/anomaly_demo_{args.source}.db")
+    if args.db:
+        store = Store(args.db)
+    else:
+        from roadmonitor.store import get_store
+        store = get_store()
     net_mode = "sample" if args.source == "sample" else "osmnx"
     net = rn.load_network(store, net_mode, args.place)
     print(f"network: {net['source']} - {len(net['segments'])} segments -"

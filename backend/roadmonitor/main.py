@@ -35,6 +35,8 @@ def prepare() -> None:
     if _application_ready:
         return
     get_store().init_schema()
+    from .anomaly.schema import ensure_tables
+    ensure_tables(get_store())
     if not any(getattr(r, "path", "").startswith("/api/v1") for r in application.routes):
         application.include_router(router)
     if not any(getattr(r, "path", "") == "/dashboard" for r in application.routes):

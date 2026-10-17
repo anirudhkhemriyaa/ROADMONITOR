@@ -233,6 +233,8 @@ def roads_segments(min_priority: float = 0.0, poi_type: str = "",
     """Segment stats filtered by priority / nearby POI type (network dist)
     / vehicle type / confirmation."""
     store = get_store()
+    from .anomaly.schema import ensure_tables
+    ensure_tables(store)
     sql = ("SELECT st.*, ns.name, ns.road_class FROM segment_stats st JOIN"
            " net_segments ns ON ns.segment_id = st.segment_id"
            " WHERE st.priority >= ?")
@@ -292,6 +294,8 @@ def roads_ranking(min_priority: float = 0.0, confirmed_only: bool = False,
     """Ranked repair list: rank, road name, severity, nearest POI + its
     network distance, priority, trip count."""
     store = get_store()
+    from .anomaly.schema import ensure_tables
+    ensure_tables(store)
     sql = ("SELECT st.*, ns.name, ns.road_class FROM segment_stats st"
            " JOIN net_segments ns ON ns.segment_id = st.segment_id"
            " WHERE st.priority >= ?")
@@ -332,6 +336,8 @@ def roads_ranking(min_priority: float = 0.0, confirmed_only: bool = False,
 def roads_geojson(min_priority: float = 0.0, confirmed_only: bool = False):
     """Map-ready FeatureCollection; segments coloured by priority."""
     store = get_store()
+    from .anomaly.schema import ensure_tables
+    ensure_tables(store)
     sql = ("SELECT st.priority, st.sev_mean, st.sev_p95, st.n_events, st.n_trips,"
            " st.confirmed, ns.segment_id, ns.geom, ns.name, ns.road_class"
            " FROM segment_stats st JOIN net_segments ns ON"
